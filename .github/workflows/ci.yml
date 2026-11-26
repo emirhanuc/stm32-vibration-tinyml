@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ARM GCC
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
+      - name: Build firmware
+        run: make -C firmware -j"$(nproc)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pm_edge_node-firmware
+          path: |
+            firmware/build/pm_edge_node.elf
+            firmware/build/pm_edge_node.bin
+
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Python deps
+        run: pip install -r tests/host/requirements.txt -r tools/requirements.txt pytest
+      - name: C features vs SciPy reference
+        run: make -C tests/host test
+      - name: Serial parser tests
+        run: cd tools && python -m pytest -q

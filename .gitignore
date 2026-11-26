@@ -1,0 +1,35 @@
+# STM32CubeIDE build output
+firmware/Debug/
+firmware/Release/
+firmware/build/
+*.o
+*.d
+*.su
+*.cyclo
+*.elf
+*.map
+*.bin
+*.hex
+*.list
+
+# IDE / user specific
+firmware/.settings/
+*.launch
+.metadata/
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Host test artefacts
+tests/host/run_inference
+tests/host/features_c.txt
+
+# OS
+.DS_Store
+Thumbs.db
