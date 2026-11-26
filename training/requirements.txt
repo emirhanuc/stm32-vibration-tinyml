@@ -1,4 +1,5 @@
 numpy>=1.24
 scipy>=1.10
 pandas>=2.0
-scikit-learn>=1.4
+# pinned: the deployed RF header is reproduced bit-for-bit with this version
+scikit-learn==1.8.0

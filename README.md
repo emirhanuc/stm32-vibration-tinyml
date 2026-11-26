@@ -1,9 +1,10 @@
-# STM32 Real-Time Vibration Fault Classification (TinyML)
+# STM32 Real-Time Vibration Classification (TinyML)
 
 On-device predictive-maintenance node for the **STM32F407G-DISC1**: the board samples its on-board
 **LIS3DSH** accelerometer at **800 Hz**, extracts 51 time- and frequency-domain features from each
 1.28 s window and classifies the machine state with a **150-tree Random Forest that runs entirely on
-the Cortex-M4F** — no PC, no cloud. Raw data and predictions are streamed to a PC over USB CDC.
+the Cortex-M4F** — inference needs no host computer or cloud. Demo task: recognising the fan level
+(6 levels) of a desktop PC from its vibration. Raw data and predictions are streamed over USB CDC.
 
 ![CI](https://github.com/emirhanuc/stm32-vibration-tinyml/actions/workflows/ci.yml/badge.svg)
 
@@ -16,7 +17,7 @@ the Cortex-M4F** — no PC, no cloud. Raw data and predictions are streamed to a
   frequency, total power and 11 band powers per axis. Verified against
   `scipy.signal.welch` / `scipy.stats.kurtosis` — **max relative error 6 × 10⁻⁸** (see [tests](#tests)).
 - **Random Forest exported to plain C arrays** (150 trees, 6 classes) plus a logistic-regression
-  baseline; no runtime library needed. **81.7 % 5-fold CV accuracy** on 180 recorded windows.
+  baseline; no runtime library needed. **84.4 % holdout / 82.2 % 5-fold CV accuracy** on 6 fan levels.
 - **Full pipeline in the repo**: data collection script, raw dataset, training/export script.
 - **USB CDC virtual COM port** instead of UART (the DISC1 ST-LINK does not bridge USART2 to the PC).
 - CI: firmware cross-compiled with `arm-none-eabi-gcc` and host tests on every push.
@@ -109,49 +110,59 @@ AI_RESULT window=<n> class=1.<c> inference_ms=<t>
 
 ## Data & training
 
-Data was recorded on the board with `tools/collect_dataset.py`: **6 classes x 30 windows x 1024 samples**
-(180 windows, 800 Hz, ~38 s of vibration per class).
+**Task:** classify the fan level of a desktop PC (CPU, GPU and system fans) from the vibration
+measured by the board. Data was recorded with `tools/collect_dataset.py`:
+**6 levels x 30 windows x 1024 samples** (180 windows, 800 Hz, ~38 s per level).
 
-| Label | Meaning |
-|---|---|
-| 1.1 – 1.6 | **TODO: describe each machine condition** |
+| Class | Fan level | CPU fan (RPM) | GPU fan (RPM) | System fan (RPM) |
+|---|---|---|---|---|
+| 1.1 | 1 - lowest | 2700 | 3300 | 4300 |
+| 1.2 | 2 | 3600 | 3900 | 4900 |
+| 1.3 | 3 | 4200 | 4700 | 5600 |
+| 1.4 | 4 | 5000 | 5500 | 5800 |
+| 1.5 | 5 - one below max | 5500 | 6200 | 6700 |
+| 1.6 | 6 - highest | max | max | max |
+
+Mean vibration RMS (raw counts) barely changes across levels 1-5 (X 88-96, Y 43, Z 68-71) and only
+jumps at the highest level (X 128, Z 94). The classifier therefore relies mainly on **spectral**
+features: the most important are Z-axis band power at 95-110 Hz, the Z dominant frequency, X crest
+factor and the 250-350 Hz band.
 
 ```bash
 pip install -r training/requirements.txt
-python training/train.py            # 5-fold CV report + export to training/output/
+python training/train.py            # evaluate + export to training/output/
 python training/train.py --deploy   # also overwrite the firmware model header
 ```
 
-The export is checked end to end: the C implementation running the exported tables reproduces
-scikit-learn's predictions on **180/180 windows** for both models.
+**Reproducible:** with `scikit-learn==1.8.0`, `train.py` regenerates the firmware model header
+(`pm_models_data.h`) **bit-for-bit**; CI checks this on every push. The C implementation running
+the exported tables reproduces scikit-learn's predictions on 180/180 windows.
 
-### Results (5-fold stratified cross-validation, 180 windows)
+### Results
 
-| Model | Accuracy | Notes |
-|---|---|---|
-| Random Forest (150 trees, depth 6) | **81.7 %** | classes 1.5 and 1.6: 100 % recall |
-| Logistic Regression (scaler folded into weights) | 78.9 % | |
+| Model | Holdout acc. (25 %, 45 windows) | Macro F1 | 5-fold CV acc. |
+|---|---|---|---|
+| **Random Forest** (150 trees, depth 5) - deployed | **84.4 %** | 0.837 | 82.2 % |
+| Logistic Regression | 77.8 % | 0.773 | 78.9 % |
+| MLP (24-12) | 75.6 % | 0.740 | 75.6 % |
 
 ```
-RF confusion matrix (rows = true, cols = predicted)
+RF holdout confusion matrix (rows = true, cols = predicted)
       1.1 1.2 1.3 1.4 1.5 1.6
-1.1 [ 21   7   2   0   0   0]
-1.2 [  8  17   3   2   0   0]
-1.3 [  2   3  24   0   1   0]
-1.4 [  1   4   0  25   0   0]
-1.5 [  0   0   0   0  30   0]
-1.6 [  0   0   0   0   0  30]
+1.1 [  7   0   0   0   0   0]
+1.2 [  4   3   0   0   0   0]
+1.3 [  0   0   7   0   1   0]
+1.4 [  1   0   0   7   0   0]
+1.5 [  0   0   1   0   7   0]
+1.6 [  0   0   0   0   0   7]
 ```
 
-> The firmware currently ships the earlier hardware-tested model (3 412 RF nodes, trained on the same
-> data). `train.py --deploy` replaces it with the model above (4 396 nodes, ~+30 KB Flash).
+The hardest pair is levels 1 and 2 (lowest RPM, smallest vibration difference); the highest level is
+always recognised.
 
-Most errors are between 1.1 and 1.2. The most important features are Z-axis band power around
-75–125 Hz, the dominant frequency and the time-domain RMS/kurtosis/crest factor.
-
-**Limitations.** Each class was recorded in a single session, so cross-validation cannot fully separate
-"fault signature" from "session conditions" (mounting, time drift). The next dataset should contain
-several sessions per class with a leave-one-session-out evaluation.
+**Limitations.** Each level was recorded in a single session, so window-level splits are not
+independent-session validation and the scores above are exploratory. The next dataset should
+contain several sessions per level, evaluated with leave-one-session-out.
 
 ## Tests
 
