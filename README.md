@@ -121,12 +121,23 @@ measured by the board. Data was recorded with `tools/collect_dataset.py`:
 | 1.3 | 3 | 4200 | 4700 | 5600 |
 | 1.4 | 4 | 5000 | 5500 | 5800 |
 | 1.5 | 5 - one below max | 5500 | 6200 | 6700 |
-| 1.6 | 6 - highest | max | max | max |
+| 1.6 | 6 - max fan mode | 6000 | 6600 | 7400 |
 
-Mean vibration RMS (raw counts) barely changes across levels 1-5 (X 88-96, Y 43, Z 68-71) and only
-jumps at the highest level (X 128, Z 94). The classifier therefore relies mainly on **spectral**
-features: the most important are Z-axis band power at 95-110 Hz, the Z dominant frequency, X crest
-factor and the 250-350 Hz band.
+Mean of 30 windows per level (raw counts, mean removed per axis; combined = sqrt(X²+Y²+Z²)):
+
+| Class | X RMS | Y RMS | Z RMS | Combined RMS | Dominant freq. |
+|---|---|---|---|---|---|
+| 1.1 | 88.25 | 43.04 | 68.58 | 119.8 | 85.9 Hz |
+| 1.2 | 88.31 | 42.60 | 68.06 | 119.4 | 85.9 Hz |
+| 1.3 | 93.01 | 43.43 | 70.63 | 124.6 | 85.2 Hz |
+| 1.4 | 89.44 | 43.34 | 70.03 | 121.6 | 89-91 Hz |
+| 1.5 | 95.61 | 42.81 | 70.73 | 126.4 | 85.9 Hz |
+| 1.6 | 128.27 | 48.50 | 94.02 | 166.3 | 116.4 Hz |
+
+Vibration energy barely changes across levels 1-5 and only jumps at max fan mode (+31.5 % combined
+RMS vs. 1.5, +38.8 % vs. 1.1), where the dominant frequency also moves from ~86 Hz to 116 Hz. Levels
+1-5 must therefore be separated by finer **spectral** detail: the most important features are Z-axis
+band power at 95-110 Hz, the Z dominant frequency, X crest factor and the 250-350 Hz band.
 
 ```bash
 pip install -r training/requirements.txt
