@@ -1,44 +1,20 @@
-"""Independent NumPy/SciPy reference for the 51 on-device features.
+"""Check the C feature extractor against the Python reference (training/features.py).
 
 Usage:
     python reference_features.py test_window.csv features_c.txt
-
-Recomputes every feature with scipy and checks the C implementation
-(output of ./run_inference) within a relative tolerance.
 """
 import sys
+from pathlib import Path
 
 import numpy as np
-from scipy import signal, stats
 
-FS = 800.0
-N = 1024
-BANDS = [(0, 25), (25, 50), (50, 60), (60, 75), (75, 95), (95, 110),
-         (110, 125), (125, 160), (160, 220), (220, 250), (250, 350)]
-
-
-def axis_features(x: np.ndarray) -> list[float]:
-    x = x.astype(np.float64) - x.mean()
-    rms = np.sqrt(np.mean(x ** 2))
-    f, p = signal.welch(x, fs=FS, nperseg=N, window="hann",
-                        scaling="density", detrend=False)
-    feats = [
-        rms,
-        x.max() - x.min(),
-        np.abs(x).max() / max(rms, 1e-9),
-        stats.kurtosis(x, fisher=True, bias=False),
-        f[1 + np.argmax(p[1:])],
-        np.trapz(p, f) if hasattr(np, "trapz") else np.trapezoid(p, f),
-    ]
-    df = f[1] - f[0]
-    for lo, hi in BANDS:
-        feats.append(p[(f >= lo) & (f < hi)].sum() * df)
-    return feats
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "training"))
+from features import window_features  # noqa: E402
 
 
 def main() -> int:
     data = np.loadtxt(sys.argv[1], delimiter=",", skiprows=1)
-    ref = np.array(sum((axis_features(data[:, a]) for a in range(3)), []))
+    ref = window_features(data)
 
     c_vals = {}
     for line in open(sys.argv[2]):

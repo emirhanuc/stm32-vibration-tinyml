@@ -28,8 +28,10 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install Python deps
-        run: pip install -r tests/host/requirements.txt -r tools/requirements.txt pytest
+        run: pip install -r training/requirements.txt -r tools/requirements.txt pytest
       - name: C features vs SciPy reference
         run: make -C tests/host test
       - name: Serial parser tests
         run: cd tools && python -m pytest -q
+      - name: Train + export model (smoke test)
+        run: python training/train.py --out /tmp/model

@@ -33,3 +33,6 @@ tests/host/features_c.txt
 # OS
 .DS_Store
 Thumbs.db
+
+# Training output (regenerate with: python training/train.py)
+training/output/pm_models_data.h

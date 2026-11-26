@@ -15,8 +15,9 @@ the Cortex-M4F** — no PC, no cloud. Raw data and predictions are streamed to a
 - **Feature extraction in C that matches SciPy**: RMS, peak-to-peak, crest factor, kurtosis, dominant
   frequency, total power and 11 band powers per axis. Verified against
   `scipy.signal.welch` / `scipy.stats.kurtosis` — **max relative error 6 × 10⁻⁸** (see [tests](#tests)).
-- **Random Forest exported to plain C arrays** (150 trees, 3 412 nodes, 6 classes) plus a
-  logistic-regression baseline; no runtime library needed.
+- **Random Forest exported to plain C arrays** (150 trees, 6 classes) plus a logistic-regression
+  baseline; no runtime library needed. **81.7 % 5-fold CV accuracy** on 180 recorded windows.
+- **Full pipeline in the repo**: data collection script, raw dataset, training/export script.
 - **USB CDC virtual COM port** instead of UART (the DISC1 ST-LINK does not bridge USART2 to the PC).
 - CI: firmware cross-compiled with `arm-none-eabi-gcc` and host tests on every push.
 
@@ -57,8 +58,16 @@ firmware/                     STM32CubeIDE project (PM_EDGE_NODE_V2.ioc)
   Services/Inference/         feature extraction + RF / LR classifiers
     generated/pm_models_data.h   model exported from Python
   Makefile                    standalone GCC build (no IDE needed)
-tools/serial_monitor.py       read USB CDC output, print predictions, save labelled windows
-tests/host/                   C-vs-SciPy numerical test of the feature extractor
+training/
+  features.py                 Python twin of the C feature extractor
+  train.py                    CV evaluation, RF + LR training, export to C header
+tools/
+  collect_dataset.py          record labelled windows from the board to CSV
+  serial_monitor.py           live predictions + optional CSV logging
+  check_port.py               list ports / sanity-check the stream
+tests/host/                   C-vs-Python numerical test of the feature extractor
+data/raw/class_1.x.csv        6 classes x 30 windows x 1024 samples (800 Hz, raw counts)
+data/raw/pilot_20261015/      earlier unlabelled pilot sessions
 data/sample/                  raw SWV/ITM capture from the board (still, 1 g on Z)
 ```
 
@@ -98,17 +107,57 @@ WINDOW <n> | samples=1024 | missed=<m> | dropped=<d>
 AI_RESULT window=<n> class=1.<c> inference_ms=<t>
 ```
 
-## Classes
+## Data & training
+
+Data was recorded on the board with `tools/collect_dataset.py`: **6 classes x 30 windows x 1024 samples**
+(180 windows, 800 Hz, ~38 s of vibration per class).
 
 | Label | Meaning |
 |---|---|
 | 1.1 – 1.6 | **TODO: describe each machine condition** |
 
+```bash
+pip install -r training/requirements.txt
+python training/train.py            # 5-fold CV report + export to training/output/
+python training/train.py --deploy   # also overwrite the firmware model header
+```
+
+The export is checked end to end: the C implementation running the exported tables reproduces
+scikit-learn's predictions on **180/180 windows** for both models.
+
+### Results (5-fold stratified cross-validation, 180 windows)
+
+| Model | Accuracy | Notes |
+|---|---|---|
+| Random Forest (150 trees, depth 6) | **81.7 %** | classes 1.5 and 1.6: 100 % recall |
+| Logistic Regression (scaler folded into weights) | 78.9 % | |
+
+```
+RF confusion matrix (rows = true, cols = predicted)
+      1.1 1.2 1.3 1.4 1.5 1.6
+1.1 [ 21   7   2   0   0   0]
+1.2 [  8  17   3   2   0   0]
+1.3 [  2   3  24   0   1   0]
+1.4 [  1   4   0  25   0   0]
+1.5 [  0   0   0   0  30   0]
+1.6 [  0   0   0   0   0  30]
+```
+
+> The firmware currently ships the earlier hardware-tested model (3 412 RF nodes, trained on the same
+> data). `train.py --deploy` replaces it with the model above (4 396 nodes, ~+30 KB Flash).
+
+Most errors are between 1.1 and 1.2. The most important features are Z-axis band power around
+75–125 Hz, the dominant frequency and the time-domain RMS/kurtosis/crest factor.
+
+**Limitations.** Each class was recorded in a single session, so cross-validation cannot fully separate
+"fault signature" from "session conditions" (mounting, time drift). The next dataset should contain
+several sessions per class with a leave-one-session-out evaluation.
+
 ## Tests
 
 ```bash
-pip install -r tests/host/requirements.txt
-make -C tests/host test       # compiles pm_inference.c for the PC and compares with SciPy
+pip install -r training/requirements.txt
+make -C tests/host test       # compiles pm_inference.c for the PC and compares with training/features.py
 cd tools && python -m pytest  # serial protocol parser
 ```
 
@@ -120,6 +169,7 @@ PASS
 
 ## Roadmap
 
+- [ ] More sessions per class + leave-one-session-out evaluation
 - [ ] CMSIS-DSP FFT for the PSD (target: real-time inference, no sampling pause)
 - [ ] Int8 1D-CNN / autoencoder variant via TFLite Micro or X-CUBE-AI; compare against the RF
 - [ ] LED status (LD4 normal / LD5 fault) on the board
